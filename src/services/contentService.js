@@ -1,0 +1,109 @@
+import { newsItems } from '../data/news.js'
+
+const url = import.meta.env.VITE_SUPABASE_URL?.replace(/\/$/, '')
+const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+const configured = Boolean(url && anonKey)
+const NEWS = 'school_news'
+const PEOPLE = 'school_people'
+const SETTINGS = 'school_settings'
+const storageKey = 'school13-content-v1'
+let session = localStorage.getItem('school13-session') || ''
+let currentUser = JSON.parse(localStorage.getItem('school13-user') || 'null')
+
+const initialNews = () => structuredClone(newsItems)
+const localData = () => {
+  try { return JSON.parse(localStorage.getItem(storageKey)) || { news: initialNews(), people: [], settings: {} } }
+  catch { return { news: initialNews(), people: [], settings: {} } }
+}
+const saveLocal = data => localStorage.setItem(storageKey, JSON.stringify(data))
+const headers = (token = session) => ({ apikey: anonKey, Authorization: `Bearer ${token || anonKey}`, 'Content-Type': 'application/json' })
+
+async function request(path, options = {}) {
+  const response = await fetch(`${url}/rest/v1/${path}`, { ...options, headers: { ...headers(), ...options.headers } })
+  if (!response.ok) {
+    const message = await response.text()
+    throw new Error(message || `Supabase error ${response.status}`)
+  }
+  if (response.status === 204) return null
+  return response.json()
+}
+
+const localized = (item, language = 'uz') => ({ ...item, ...(item.translations?.[language] || item.translations?.uz || {}) })
+const normalizeNews = row => ({ id: row.id, slug: row.slug, status: row.status, publishedAt: row.published_at, category: row.category, cover: row.cover || { type: 'pattern', theme: row.category }, translations: row.translations })
+const newsPayload = item => ({ slug: item.slug, status: item.status, published_at: item.publishedAt, category: item.category, cover: item.cover, translations: item.translations })
+const normalizePerson = row => ({ ...row, id: row.id, translations: row.translations })
+
+export const isSupabaseConfigured = () => configured
+export const hasAdminSession = () => Boolean(session)
+export const hasContentRole = () => ['admin', 'developer'].includes(currentUser?.app_metadata?.role)
+export const hasDeveloperRole = () => currentUser?.app_metadata?.role === 'developer'
+export const clearAdminSession = () => { session = ''; currentUser = null; localStorage.removeItem('school13-session'); localStorage.removeItem('school13-user') }
+
+export async function signIn(email, password) {
+  if (!configured) throw new Error('Добавьте VITE_SUPABASE_URL и VITE_SUPABASE_ANON_KEY в .env.local, чтобы включить вход администратора.')
+  const response = await fetch(`${url}/auth/v1/token?grant_type=password`, { method: 'POST', headers: { apikey: anonKey, 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) })
+  const data = await response.json()
+  if (!response.ok) throw new Error(data.msg || data.message || 'Не удалось войти. Проверьте email и пароль.')
+  session = data.access_token
+  currentUser = data.user
+  localStorage.setItem('school13-session', session)
+  localStorage.setItem('school13-user', JSON.stringify(currentUser))
+  return data.user
+}
+
+export async function createAdminAccount(email, password) {
+  if (!configured || !session) throw new Error('Войдите в Supabase как разработчик.')
+  const response = await fetch(`${url}/functions/v1/create-admin`, { method: 'POST', headers: { ...headers(), Authorization: `Bearer ${session}` }, body: JSON.stringify({ email, password }) })
+  const data = await response.json()
+  if (!response.ok) throw new Error(data.error || 'Не удалось создать администратора.')
+  return data
+}
+
+export async function getAllNews() {
+  if (!configured) return localData().news
+  return (await request(`${NEWS}?select=*&order=published_at.desc`)).map(normalizeNews)
+}
+export async function getPublishedNews(language = 'uz') {
+  const rows = configured ? (await request(`${NEWS}?select=*&status=eq.published&order=published_at.desc`)).map(normalizeNews) : localData().news.filter(item => item.status === 'published')
+  return rows.map(item => localized(item, language))
+}
+export async function getNewsBySlug(slug, language = 'uz') {
+  const list = configured ? (await request(`${NEWS}?select=*&slug=eq.${encodeURIComponent(slug)}&status=eq.published&limit=1`)).map(normalizeNews) : localData().news.filter(item => item.slug === slug && item.status === 'published')
+  return list[0] ? localized(list[0], language) : null
+}
+export async function saveNews(item) {
+  if (!configured) {
+    const data = localData(); const index = data.news.findIndex(row => row.id === item.id)
+    if (index < 0) data.news.push({ ...item, id: item.id || crypto.randomUUID() }); else data.news[index] = item
+    saveLocal(data); return
+  }
+  if (item.id) await request(`${NEWS}?id=eq.${encodeURIComponent(item.id)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(newsPayload(item)) })
+  else await request(NEWS, { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(newsPayload(item)) })
+}
+export async function deleteNews(id) {
+  if (!configured) { const data = localData(); data.news = data.news.filter(row => row.id !== id); saveLocal(data); return }
+  await request(`${NEWS}?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+export async function getPeople() {
+  if (!configured) return localData().people
+  return (await request(`${PEOPLE}?select=*&order=sort_order.asc`)).map(normalizePerson)
+}
+export async function savePerson(person) {
+  if (!configured) { const data = localData(); const index = data.people.findIndex(row => row.id === person.id); if (index < 0) data.people.push({ ...person, id: person.id || crypto.randomUUID() }); else data.people[index] = person; saveLocal(data); return }
+  const payload = { role: person.role, photo_url: person.photo_url || null, sort_order: person.sort_order || 0, translations: person.translations }
+  if (person.id) await request(`${PEOPLE}?id=eq.${encodeURIComponent(person.id)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(payload) })
+  else await request(PEOPLE, { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(payload) })
+}
+export async function deletePerson(id) {
+  if (!configured) { const data = localData(); data.people = data.people.filter(row => row.id !== id); saveLocal(data); return }
+  await request(`${PEOPLE}?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+export async function getSettings() {
+  if (!configured) return localData().settings
+  const rows = await request(`${SETTINGS}?select=key,value`)
+  return Object.fromEntries(rows.map(row => [row.key, row.value]))
+}
+export async function saveSettings(settings) {
+  if (!configured) { const data = localData(); data.settings = settings; saveLocal(data); return }
+  for (const [key, value] of Object.entries(settings)) await request(`${SETTINGS}?on_conflict=key`, { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ key, value }) })
+}

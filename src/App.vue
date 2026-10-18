@@ -49,10 +49,10 @@ onMounted(() => {
 
 <template>
   <div class="site-shell" :class="{ 'theme-dark': darkMode }">
-    <Header :language="language" :dark-mode="darkMode" :copy="copy" @language="setLanguage" @theme="toggleTheme" @navigate-section="navigateToSection" />
+    <Header v-if="!['admin', 'developer-admin'].includes(route.name)" :language="language" :dark-mode="darkMode" :copy="copy" @language="setLanguage" @theme="toggleTheme" @navigate-section="navigateToSection" />
     <RouterView v-slot="{ Component }">
       <component :is="Component" :language="language" :copy="copy" @navigate-section="navigateToSection" />
     </RouterView>
-    <footer class="site-footer container"><a class="footer-brand" href="#home" @click.prevent="navigateToSection('home')"><span class="brand-mark">13</span><span>13-MAKTAB<small>{{ copy.footerText }}</small></span></a><span>© 2026 {{ language === 'uz' ? '13-maktab. Barcha huquqlar himoyalangan.' : 'Школа № 13. Все права защищены.' }}</span><a href="#home" class="back-top" @click.prevent="navigateToSection('home')">↑</a></footer>
+    <footer v-if="!['admin', 'developer-admin'].includes(route.name)" class="site-footer container"><a class="footer-brand" href="#home" @click.prevent="navigateToSection('home')"><span class="brand-mark">13</span><span>13-MAKTAB<small>{{ copy.footerText }}</small></span></a><span>© 2026 {{ language === 'uz' ? '13-maktab. Barcha huquqlar himoyalangan.' : 'Школа № 13. Все права защищены.' }}</span><a href="#home" class="back-top" @click.prevent="navigateToSection('home')">↑</a></footer>
   </div>
 </template>

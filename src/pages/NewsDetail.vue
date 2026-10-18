@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
-import { getNewsBySlug, getPublishedNews } from '../services/newsService.js'
+import { getNewsBySlug, getPublishedNews } from '../services/contentService.js'
 
 const props = defineProps({ language: { type: String, required: true } })
 const emit = defineEmits(['navigate-section'])
